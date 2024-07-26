@@ -1,0 +1,6 @@
+.vs
+game/main.pdb
+game/premake5.lua
+game/obj
+bin
+raylib-master
