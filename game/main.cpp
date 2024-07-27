@@ -12,6 +12,8 @@
 #include "assets/coin.h"
 #include "assets/power.h"
 #include "assets/level.h"
+#include "assets/no.h"
+#include "assets/yes.h"
 #include "base64.hpp"
 #include "cstdio"
 
@@ -19,9 +21,31 @@ Sound explosion;
 Sound coin;
 Sound power;
 Sound levelup;
+Sound yes;
+Sound no;
 
 float dt;
 using namespace std;
+
+bool stob(string b) {
+	if (b == "true") {
+		return true;
+	}
+	return false;
+}
+
+string btos(bool b) {
+	if (b) { return "true"; }
+	else { return "false"; }
+}
+string condstring(string tru, bool cond, string fals) {
+	if (cond) {
+		return tru;
+	}
+	else {
+		return fals;
+	}
+}
 
 
 vector<string> splitString(string input, char delimiter)
@@ -37,12 +61,12 @@ vector<string> splitString(string input, char delimiter)
 
 
 Color set_alpha(Color original, float alpha) {
-	original.a = alpha;
+	original.a = (unsigned char)alpha;
 	return original;
 }
 
 struct Spike {
-	int i; // type
+	int i = 0; // type
 	float f = -25.0f; // frame
 };
 
@@ -88,11 +112,29 @@ struct SpikeArray {
 	array<Spike, 10> right = reSpikeInternal();
 };
 
+struct ColorUnlocker {
+	Color c;
+	bool u;
+	int p;
+	string n;
+};
+
 class LocalPlayer {
 public:
 	float yvel = 0;
 	Vector2 pos = { 10, 10 };
-	Color color = {(unsigned char)GetRandomValue(0,255),(unsigned char)GetRandomValue(0,255),(unsigned char)GetRandomValue(0,255),255};
+	vector<ColorUnlocker> color = {
+		{ {255,255,255,255},false,1000,"Custom"},
+		{ {255,255,255,255},true,0,"White"},
+		{ {255,0,128,255},false,200,"Pink"},
+		{ {255,0,0,255},false,200,"Red"},
+		{ {0,255,0,255},false,200,"Green"},
+		{ {0,0,255,255},false,200,"Blue"},
+		{ {255,128,0,255},false,200,"Orange"},
+		{ {255,230,0,255},false,200,"Yellow"},
+		{ {255,0,255,255},false,200,"Purple"}
+	};
+	int colorPreset = 1;
 	int dir = 1;
 	int level = 1;
 	int highscore = 0;
@@ -101,7 +143,7 @@ public:
 	int coins = 0;
 	int menu = 3;
 	int submenu = 0;
-	int menutime = time(nullptr);
+	int menutime = (int)time(nullptr);
 	float starttimer = 0.0f;
 	bool colls = false;
 	bool debug = false;
@@ -111,17 +153,21 @@ public:
 	Rectangle collider = { pos.x,pos.y,20,20 };
 	SpikeArray spikes;
 
-	LocalPlayer() {
+	void Load() {
 		if (FileExists("ats2.savedata")) {
 			vector<string> vec = splitString(base64::from_base64(LoadFileText("ats2.savedata")), '\n');
-			if (vec.size() == 7) {
+			if (vec.size() >= 8) {
 				highscore = atoi(vec.at(0).c_str());
 				coins = atoi(vec.at(1).c_str());
 				deaths = atoi(vec.at(2).c_str());
-				color.r = atoi(vec.at(3).c_str());
-				color.g = atoi(vec.at(4).c_str());
-				color.b = atoi(vec.at(5).c_str());
+				color.at(0).c.r = atoi(vec.at(3).c_str());
+				color.at(0).c.g = atoi(vec.at(4).c_str());
+				color.at(0).c.b = atoi(vec.at(5).c_str());
 				round = atof(vec.at(6).c_str());
+				colorPreset = atoi(vec.at(7).c_str());
+				for (int i = 0; i < color.size(); i++) {
+					color.at(i).u = stob(vec.at(8 + i).c_str());
+				}
 			}
 		}
 	}
@@ -160,7 +206,7 @@ public:
 
 	void Draw() {
 		// draw function
-		DrawRectangleRounded({ pos.x,pos.y,20,20 }, round,5, set_alpha(color, 255 * starttimer));
+		DrawRectangleRounded({ pos.x,pos.y,20,20 }, round,5, set_alpha(color.at(colorPreset).c, 255 * starttimer));
 	}
 
 	void Die() {
@@ -212,12 +258,16 @@ int main() {
 	coin = LoadSoundFromWave({COIN_FRAME_COUNT,COIN_SAMPLE_RATE,COIN_SAMPLE_SIZE,COIN_CHANNELS,COIN_DATA});
 	power = LoadSoundFromWave({ POWER_FRAME_COUNT,POWER_SAMPLE_RATE,POWER_SAMPLE_SIZE,POWER_CHANNELS,POWER_DATA });
 	levelup = LoadSoundFromWave({ LEVEL_FRAME_COUNT,LEVEL_SAMPLE_RATE,LEVEL_SAMPLE_SIZE,LEVEL_CHANNELS,LEVEL_DATA });
+	yes = LoadSoundFromWave({ YES_FRAME_COUNT,YES_SAMPLE_RATE,YES_SAMPLE_SIZE,YES_CHANNELS,YES_DATA });
+	no = LoadSoundFromWave({ NO_FRAME_COUNT,NO_SAMPLE_RATE,NO_SAMPLE_SIZE,NO_CHANNELS,NO_DATA });
 
 	LocalPlayer player;
+	player.Load();
+	int colorselection = player.colorPreset;
 	bool save = true;
 
 	while (!WindowShouldClose()) {
-		dt = GetFrameTime() * (60 + player.level + (player.coins / 10));
+		dt = GetFrameTime() * (60 + player.level);
 		// Do Shit
 		if (player.menu == 0) {
 			if (IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_UP) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -387,15 +437,25 @@ int main() {
 				player.starttimer = 10000;
 				player.Draw();
 				string cText = "Avoid That Spike 2";
-				DrawText(cText.c_str(), 10, 10, 40, rbowc[(int)GetTime()%14]);
-				cText = "1: Start Playing\n2^: Player Roundness " + to_string(player.round) + "\n3^: Player RED " + to_string(player.color.r) + "\n4^: Player GREEN " + to_string(player.color.g) + "\n5^: Player BLUE " + to_string(player.color.b);
+				DrawText(cText.c_str(), 10, 10, 40, rbowc[(int)GetTime() % 14]);
+				cText = "1: Start Playing\n2^: Player Roundness " + to_string(player.round) + "\n  Color Preset " + to_string(player.colorPreset) + "\n\n";
+				cText += "\n8: RGB Color Selector";
 				cText += "\n9: Clear Save File";
 				cText += "\n0: Quit Game :(\n\nHighscore: " + to_string(player.highscore);
 				cText += "\nCoins: " + to_string(player.coins);
 				cText += "\nDeaths: " + to_string(player.deaths);
 				DrawText(cText.c_str(), 10, 50, 20, WHITE);
-				cText = "Menu Items with ^ are sliders, press up or down arrows to change the value.\nMade by Spelis :)";
-				DrawText(cText.c_str(), 5, 475,10,GRAY);
+				cText = "  3*" + to_string(colorselection) + ": Color BUY " + condstring("< ", colorselection != 0, "") + player.color.at(colorselection).n + ": " + to_string(player.color.at(colorselection).p) + condstring("c >", colorselection != player.color.size() - 1, "c") + "\n  4*" + to_string(colorselection) + ": Color EQUIP " + condstring("< ", colorselection != 0, "") + btos(colorselection == player.colorPreset) + condstring(" >", colorselection != player.color.size()-1, "");
+				Color etextc;
+				if (player.color.at(colorselection).u) etextc = GREEN;
+				else if (!player.color.at(colorselection).u && player.coins > player.color.at(colorselection).p) etextc = YELLOW;
+				else etextc = RED;
+				DrawText(cText.c_str(), 10, 115, 20, etextc);
+				DrawRectangle(7, 98, 10, 10, player.color.at(player.colorPreset).c);
+				DrawRectangle(7, 120, 10, 30, player.color.at(colorselection).c);
+				cText = "Menu Items with ^ are sliders, press left or right arrows to change the value.\nMenu Items with * are sliders with confirmation, press up arrow to accept.\nMade by Spelis :)";
+				DrawText(cText.c_str(), 5, 460, 10, GRAY);
+
 
 				if (IsKeyPressed(KEY_ZERO)) {
 					break;
@@ -405,42 +465,85 @@ int main() {
 					player.setmenu(0);
 				}
 				if (IsKeyDown(KEY_TWO)) {
-					player.round += (IsKeyDown(KEY_UP) - IsKeyDown(KEY_DOWN)) * 0.001;
+					player.round += (IsKeyDown(KEY_RIGHT) - IsKeyDown(KEY_LEFT)) * 0.001f;
 				}
 				if (IsKeyDown(KEY_THREE)) {
-					if (player.frame % 7 == 2) {
-						player.color.r += IsKeyDown(KEY_UP) - IsKeyDown(KEY_DOWN);
+					colorselection += IsKeyPressed(KEY_RIGHT) - IsKeyPressed(KEY_LEFT);
+					if (colorselection < 0) {
+						colorselection = 0;
+						PlaySound(no);
+					}
+					else if (colorselection > player.color.size() - 1) {
+						colorselection = player.color.size() - 1; 
+						PlaySound(no);
+					}
+					if (IsKeyPressed(KEY_UP)) {
+						
+						if (player.coins >= player.color.at(colorselection).p && !player.color.at(colorselection).u) {
+							PlaySound(yes);
+							player.coins -= player.color.at(colorselection).p;
+							player.color.at(colorselection).u = true;
+						}
+						else {
+							PlaySound(no);
+						}
 					}
 				}
 				if (IsKeyDown(KEY_FOUR)) {
-					if (player.frame % 7 == 2) {
-					player.color.g += IsKeyDown(KEY_UP) - IsKeyDown(KEY_DOWN);
-				}}
-				if (IsKeyDown(KEY_FIVE)) {
-					if (player.frame % 7 == 2) {
-					player.color.b += IsKeyDown(KEY_UP) - IsKeyDown(KEY_DOWN);
-				}}
-				if (IsKeyPressed(KEY_NINE)) {
-					player.yvel = 0;
-					player.pos = { 10, 10 };
-					player.color = { (unsigned char)GetRandomValue(0,255),(unsigned char)GetRandomValue(0,255),(unsigned char)GetRandomValue(0,255),255 };
-					player.dir = 1;
-					player.level = 1;
-					player.highscore = 0;
-					player.jumps = 0;
-					player.frame = 0;
-					player.coins = 0;
-					player.menu = 3;
-					player.submenu = 0;
+					colorselection += IsKeyPressed(KEY_RIGHT) - IsKeyPressed(KEY_LEFT);
+					if (colorselection < 0) {
+						colorselection = 0;
+						PlaySound(no);
+					}
+					else if (colorselection > player.color.size() - 1) {
+						colorselection = player.color.size() - 1;
+						PlaySound(no);
+					}
+					if (IsKeyPressed(KEY_UP)) {
+						if (player.color.at(colorselection).u) {
+							PlaySound(yes);
+							player.colorPreset = colorselection;
+						}
+						else {
+							PlaySound(no);
+						}
+					}
+				}
+				if (IsKeyPressed(KEY_EIGHT)) {
+					player.submenu = 1;
 					player.menutime = time(nullptr);
-					player.starttimer = 0.0f;
-					player.colls = false;
-					player.debug = false;
-					player.deaths = 0;
-					player.gravityMul = 1;
-					player.round = 0;
+				}
+				if (IsKeyPressed(KEY_NINE)) {
+					player = {};
 					remove("ats2.savedata");
-					
+					save = false;
+				}
+			}
+			else if (player.submenu == 1) {
+				int ctime = time(nullptr);
+				player.frame++;
+				player.pos = { 460,460 };
+				player.starttimer = 10000;
+				DrawRectangleRounded({ player.pos.x,player.pos.y,20,20 }, player.round, 5, set_alpha(player.color.at(0).c, 255 * player.starttimer));
+				string cText = "RGB Selector";
+				DrawText(cText.c_str(), 10, 10, 40, rbowc[(int)GetTime() % 14]);
+
+				cText = "1^: Red " + to_string(player.color.at(0).c.r) + "\n2^: Green " + to_string(player.color.at(0).c.g) + "\n3^: Blue " + to_string(player.color.at(0).c.b) + "\n\n0: Back";
+				DrawText(cText.c_str(), 10, 50, 20, WHITE);
+
+				if (IsKeyPressed(KEY_ZERO)) {
+					player.submenu = 0;
+				}
+				if (player.frame % 7 == 5) {
+					if (IsKeyDown(KEY_ONE)) {
+						player.color.at(0).c.r += IsKeyDown(KEY_RIGHT) - IsKeyDown(KEY_LEFT);
+					}
+					if (IsKeyDown(KEY_TWO)) {
+						player.color.at(0).c.g += IsKeyDown(KEY_RIGHT) - IsKeyDown(KEY_LEFT);
+					}
+					if (IsKeyDown(KEY_THREE)) {
+						player.color.at(0).c.b += IsKeyDown(KEY_RIGHT) - IsKeyDown(KEY_LEFT);
+					}
 				}
 			}
 		}
@@ -452,10 +555,15 @@ int main() {
 
 	// save player state idk
 
-	string saveData = to_string(player.highscore) + "\n" + to_string(player.coins) + "\n" + to_string(player.deaths) + "\n" + to_string(player.color.r) + "\n" + to_string(player.color.g) + "\n" + to_string(player.color.b) + "\n" + to_string(player.round);
-	saveData = base64::to_base64(saveData);
-	const char* fileText = saveData.c_str();
-	SaveFileText("ats2.savedata",(char*)fileText);
+	if (save) {
+		string saveData = to_string(player.highscore) + "\n" + to_string(player.coins) + "\n" + to_string(player.deaths) + "\n" + to_string(player.color.at(0).c.r) + "\n" + to_string(player.color.at(0).c.g) + "\n" + to_string(player.color.at(0).c.b) + "\n" + to_string(player.round) + "\n" + to_string(player.colorPreset);
+		for (int i = 0; i < player.color.size(); i++) {
+			saveData += "\n" + btos(player.color.at(i).u);
+		}
+		saveData = base64::to_base64(saveData);
+		const char* fileText = saveData.c_str();
+		SaveFileText("ats2.savedata", (char*)fileText);
+	}
 
 	CloseWindow();
 	return 0;
